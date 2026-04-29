@@ -27,11 +27,35 @@ def _parse_xml(zf: zipfile.ZipFile, path: str) -> ET.Element | None:
         return None
 
 
+_COMMENTS_CONTENT_TYPE = (
+    "application/vnd.openxmlformats-officedocument.wordprocessingml.comments+xml"
+)
+
+
+def _find_comments_part(zf: zipfile.ZipFile) -> str | None:
+    """Locate the comments part name via [Content_Types].xml.
+
+    Word may name it `word/comments.xml`, `word/comments1.xml`, etc., depending
+    on whether the part was created from scratch or merged. The
+    [Content_Types].xml index is the canonical lookup.
+    """
+    ct_root = _parse_xml(zf, "[Content_Types].xml")
+    if ct_root is None:
+        return None
+    types_ns = "http://schemas.openxmlformats.org/package/2006/content-types"
+    for override in ct_root.findall(f"{{{types_ns}}}Override"):
+        if override.get("ContentType") == _COMMENTS_CONTENT_TYPE:
+            part = override.get("PartName", "").lstrip("/")
+            return part or None
+    return None
+
+
 def extract_comments(docx_path: str) -> list[dict]:
     """Extract comments from DOCX as list of {id, author, date, text}."""
     docx_path = ensure_docx(docx_path)
     with zipfile.ZipFile(docx_path) as zf:
-        root = _parse_xml(zf, 'word/comments.xml')
+        part = _find_comments_part(zf)
+        root = _parse_xml(zf, part) if part else None
     if root is None:
         return []
     comments = []

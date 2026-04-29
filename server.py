@@ -784,13 +784,15 @@ def _handle_apply_changes(args: dict):
     result = _redline.apply_changes(
         file_path, edits, author=author, output_path=output_path
     )
-    return [TextContent(
-        type="text",
-        text=(
-            f"Wrote: {result['output_path']}\n"
-            f"Applied: {result['applied']} | Skipped: {result['skipped']}"
-        ),
-    )]
+    lines = [
+        f"Wrote: {result['output_path']}",
+        f"Applied: {result['applied']} | Skipped: {result['skipped']}",
+    ]
+    if result.get("details"):
+        lines.append("Skip reasons:")
+        for d in result["details"]:
+            lines.append(f"  - {d}")
+    return [TextContent(type="text", text="\n".join(lines))]
 
 
 def _handle_accept_all_changes(args: dict):
