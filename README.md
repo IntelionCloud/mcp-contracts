@@ -17,6 +17,58 @@ structure — so the agent fetches just what it needs. It also handles the
 common authoring tasks (DOCX ↔ MD, DOCX → PDF) so the same agent can edit
 and publish without leaving its tooling.
 
+## Use cases
+
+### 1. Review a DOCX with reviewer comments
+
+Counterparty sends back a DOCX with their comments and tracked changes.
+You want an agent to extract the comments, find the corresponding clauses,
+and propose responses.
+
+```
+agent: list_comments(file_path)
+       → "5 comments by lawyer@counterparty.com"
+agent: find_clause(file_path, query="4.2")  # the clause being commented on
+agent: list_tracked_changes(file_path)      # what they edited inline
+→ agent drafts a reply per comment, you review and reply
+```
+
+No need to load the whole document into context — the agent pulls just the
+clauses being argued about.
+
+### 2. Iterative editing via AI agent
+
+When a contract sees frequent edits, keep it in MD (a format the agent
+edits cleanly) and convert to DOCX only when sending to colleagues.
+
+```
+1. agent edits contract.md (clauses, prices, dates — plain text diff)
+2. md_to_docx(contract.md)                  # → contract.docx
+3. you send contract.docx to counterparty
+4. they reply with their commented version  → see use case #1
+5. agent applies accepted changes back into contract.md
+6. loop
+```
+
+Source of truth stays text-based and diffable; DOCX is the wire format.
+
+### 3. MD-in-repo, PDF for publication
+
+For public-facing legal docs (Terms of Service, privacy policy, conditions
+of service), keep the master in MD inside your repo and auto-generate the
+PDF that's actually served on the website.
+
+```
+1. You edit terms.md and commit to git
+2. CI / pre-deploy hook calls:
+     md_to_docx(terms.md)   → terms.docx  (intermediate, with proper styling)
+     docx_to_pdf(terms.docx) → terms.pdf  (the file users download)
+3. Diffs are reviewable in PRs (text), but readers get a polished PDF
+```
+
+Versioning, blame, branch reviews — all work as on regular code; the binary
+DOCX/PDF artifacts are byproducts.
+
 ## Tools
 
 ### Conversion
