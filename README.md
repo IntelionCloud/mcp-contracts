@@ -46,43 +46,72 @@ and publish without leaving its tooling.
 
 All tools take an absolute `file_path`. See `server.py` for full schemas.
 
-## Setup
+## Installation
 
-The server runs as a stdio process; register it in your MCP client config:
+### 1. Clone
+
+```bash
+git clone https://github.com/IntelionCloud/mcp-contracts.git
+cd mcp-contracts
+```
+
+### 2. Python dependencies
+
+Requires Python 3.10+.
+
+```bash
+pip install -r requirements.txt
+```
+
+### 3. PDF conversion (optional, only if you use `docx_to_pdf`)
+
+Either install LibreOffice on the host:
+
+```bash
+# Debian/Ubuntu
+sudo apt install libreoffice-core libreoffice-writer fonts-open-sans
+# macOS
+brew install --cask libreoffice
+```
+
+…or build the bundled docker image once (auto-used as fallback when no
+local `soffice` is found):
+
+```bash
+docker build -t mcp-docx-soffice:latest docker/
+```
+
+### 4. Register in your MCP client
+
+The server runs as a stdio process. Add it to your client config.
+
+**Claude Code / Claude Desktop** — add to the project's `.mcp.json`
+(or to `~/Library/Application Support/Claude/claude_desktop_config.json`
+for Claude Desktop):
 
 ```json
 {
   "mcpServers": {
     "docx-contracts": {
       "command": "python3",
-      "args": ["/path/to/mcp-contracts/server.py"]
+      "args": ["/absolute/path/to/mcp-contracts/server.py"]
     }
   }
 }
 ```
 
-### Dependencies
+Restart the MCP client; the tools (`docx_to_md`, `md_to_docx`,
+`docx_to_pdf`, …) should now appear in the tool list.
+
+### 5. Smoke test
 
 ```bash
-pip install -r requirements.txt
+echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
+  | python3 server.py
 ```
 
-### PDF conversion
-
-`docx_to_pdf` needs LibreOffice. Either install `soffice` on the host:
-
-```bash
-# Debian/Ubuntu
-apt install libreoffice-core libreoffice-writer fonts-open-sans
-# macOS
-brew install --cask libreoffice
-```
-
-…or build the bundled docker image once (used as fallback):
-
-```bash
-docker build -t mcp-docx-soffice:latest docker/
-```
+You should see a JSON response listing all tools. If the process complains
+about missing modules, re-run step 2 inside the right virtualenv.
 
 ## Tests
 
@@ -93,4 +122,7 @@ pytest
 
 ## License
 
-Private — internal Intelion Cloud tooling.
+Non-commercial use only. Free to use, modify, and share for personal,
+academic, or internal-tooling purposes. Commercial use (including reselling,
+SaaS, or use in revenue-generating products) requires written permission
+from Intelion Cloud.
