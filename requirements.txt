@@ -1,2 +1,7 @@
 mcp>=1.0.0
 python-docx>=1.0.0
+# adeu pulls pydantic v2 transitively, but we use it directly in
+# core/redline.py (`model_validate`) — pin explicitly so we don't break
+# if upstream loosens its constraint.
+pydantic>=2
+adeu @ git+https://github.com/dealfluence/adeu.git@v1.4.0

@@ -1,18 +1,15 @@
 """
 DOCX builder — generate Word documents from Markdown.
-Delegates to /shared/business/scripts/md_to_docx.py
 """
 import os
-import sys
 import tempfile
+
+from core._md_to_docx import build_docx
 
 
 def build_docx_from_md(md_path: str, output_path: str | None = None,
                        accept_changes: bool = False) -> str:
     """Convert MD to DOCX. Returns path to generated file."""
-    sys.path.insert(0, '/shared/business/scripts')
-    from md_to_docx import build_docx
-
     if output_path is None:
         base = os.path.splitext(md_path)[0]
         suffix = '_clean' if accept_changes else ''

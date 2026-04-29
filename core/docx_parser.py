@@ -1,10 +1,17 @@
 """
 DOCX parser — extract text, tracked changes, and comments from Word documents.
-Refactored from /shared/business/scripts/docx_to_md.py
+
+Public entry points (`extract_comments`, `extract_tracked_changes`,
+`convert_docx_to_md`) accept legacy `.doc` paths transparently — they go
+through `core.doc_compat.ensure_docx`, which delegates to LibreOffice and
+caches the result in /tmp.
 """
 import re
 import zipfile
 from xml.etree import ElementTree as ET
+
+from core._docx_to_md import convert_docx_to_md as _convert
+from core.doc_compat import ensure_docx
 
 NS = {
     'w': 'http://schemas.openxmlformats.org/wordprocessingml/2006/main',
@@ -22,6 +29,7 @@ def _parse_xml(zf: zipfile.ZipFile, path: str) -> ET.Element | None:
 
 def extract_comments(docx_path: str) -> list[dict]:
     """Extract comments from DOCX as list of {id, author, date, text}."""
+    docx_path = ensure_docx(docx_path)
     with zipfile.ZipFile(docx_path) as zf:
         root = _parse_xml(zf, 'word/comments.xml')
     if root is None:
@@ -46,6 +54,7 @@ def extract_comments(docx_path: str) -> list[dict]:
 
 def extract_tracked_changes(docx_path: str) -> list[dict]:
     """Extract tracked changes (insertions and deletions) from DOCX."""
+    docx_path = ensure_docx(docx_path)
     with zipfile.ZipFile(docx_path) as zf:
         doc_root = _parse_xml(zf, 'word/document.xml')
     if doc_root is None:
@@ -90,8 +99,10 @@ def extract_tracked_changes(docx_path: str) -> list[dict]:
 
 
 def convert_docx_to_md(docx_path: str, accept_changes: bool = False) -> str:
-    """Convert DOCX to Markdown string. Delegates to the script's function."""
-    import sys
-    sys.path.insert(0, '/shared/business/scripts')
-    from docx_to_md import convert_docx_to_md as _convert
+    """Convert DOCX to Markdown string.
+
+    Legacy `.doc` is transparently converted to `.docx` first via
+    `ensure_docx` (LibreOffice headless).
+    """
+    docx_path = ensure_docx(docx_path)
     return _convert(docx_path, accept_changes=accept_changes)

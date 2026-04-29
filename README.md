@@ -165,6 +165,37 @@ echo '{"jsonrpc":"2.0","id":1,"method":"tools/list"}' \
 You should see a JSON response listing all tools. If the process complains
 about missing modules, re-run step 2 inside the right virtualenv.
 
+## Localization
+
+Tools auto-detect contract language by Cyrillic-vs-Latin character ratio
+over the first 50 KB of text. Three modes are recognized:
+
+| Detected | When | Effect |
+|----------|------|--------|
+| `ru` | Cyrillic ≥ 70% of letters | Russian patterns + Russian labels (`Цена`, `Срок`, `Структура`, `п.`) |
+| `en` | Cyrillic ≤ 30% | English patterns + English labels (`Price`, `Deadline`, `Structure`, `Clause`) |
+| `ru+en` | mid-range (typical of two-column EN-RU contracts) | Both pattern sets applied with dedupe; bilingual labels (`Цена / Price`, `Структура / Structure`) |
+
+Override auto-detection by passing `language="ru" | "en" | "ru+en"` to
+any of: `find_clause`, `contract_summary`, `validate_references`,
+`read_sections`.
+
+To add a third language: extend `PATTERNS` and `LABELS` in
+`core/i18n.py`, update the `Lang` `Literal`, and adjust the threshold
+in `detect_lang` if needed.
+
+## Legacy `.doc` support
+
+All read/conversion tools (`docx_to_md`, `read_contract`, `find_clause`, …)
+accept legacy binary `.doc` files (Word 97–2003) transparently — they are
+auto-converted to `.docx` via LibreOffice headless and cached in
+`tempfile.gettempdir()` keyed by file mtime, so repeated tool calls don't
+re-invoke `soffice`. Requires either a local `soffice` install or the
+`mcp-docx-soffice` docker image (see PDF setup above).
+
+Cyrillic filenames stored in NFD form (common when copied from macOS)
+are also handled — paths are normalized to NFC at the boundary.
+
 ## Tests
 
 ```bash
@@ -174,7 +205,13 @@ pytest
 
 ## License
 
-Non-commercial use only. Free to use, modify, and share for personal,
-academic, or internal-tooling purposes. Commercial use (including reselling,
-SaaS, or use in revenue-generating products) requires written permission
-from Intelion Cloud.
+This wrapper code is **non-commercial use only**: free for personal,
+academic, or internal-tooling purposes. Commercial use (reselling, SaaS,
+or use in revenue-generating products) requires written permission from
+Intelion Cloud.
+
+Bundled dependencies retain their original licenses — most notably
+[`adeu`](https://github.com/dealfluence/adeu) is **MIT-licensed** and is
+*not* affected by this restriction. The non-commercial clause covers only
+the wrapper layer in this repository (the MCP server, tool schemas, and
+helper modules under `core/`).

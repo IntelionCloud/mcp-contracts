@@ -3,8 +3,9 @@ DOCX → PDF conversion via LibreOffice headless.
 
 Tries local `soffice` first, falls back to a docker image.
 
-Build the docker image once:
-    docker build -t mcp-docx-soffice:latest /shared/business/mcp-docx-contracts/docker
+Build the docker image once (paths resolved relative to this file so the
+hint works regardless of where the project is checked out):
+    docker build -t mcp-docx-soffice:latest <project>/docker
 """
 import os
 import shutil
@@ -12,11 +13,12 @@ import subprocess
 import tempfile
 import uuid
 
+# Project root = parent of `core/`; docker context lives at <root>/docker.
+_PROJECT_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_DOCKER_CONTEXT = os.path.join(_PROJECT_ROOT, "docker")
+
 DOCKER_IMAGE = "mcp-docx-soffice:latest"
-DOCKER_BUILD_HINT = (
-    "docker build -t mcp-docx-soffice:latest "
-    "/shared/business/mcp-docx-contracts/docker"
-)
+DOCKER_BUILD_HINT = f"docker build -t {DOCKER_IMAGE} {_DOCKER_CONTEXT}"
 
 
 class LibreOfficeNotInstalled(RuntimeError):
@@ -124,7 +126,7 @@ def _convert_docker(docx_path: str, output_path: str, timeout: int) -> None:
         )
         if cp_out.returncode != 0:
             raise ConversionFailed(
-                f"PDF не извлечён из контейнера: {cp_out.stderr.strip()}. "
+                f"failed to extract PDF from container: {cp_out.stderr.strip()}. "
                 f"soffice stdout: {run.stdout.strip()}"
             )
     finally:
@@ -154,6 +156,6 @@ def convert_docx_to_pdf(docx_path: str, output_path: str | None = None,
         return output_path
 
     raise LibreOfficeNotInstalled(
-        "LibreOffice не найден ни локально, ни как docker-образ "
-        f"{DOCKER_IMAGE}. Соберите образ: {DOCKER_BUILD_HINT}"
+        "LibreOffice is not available locally and the docker image "
+        f"{DOCKER_IMAGE} is not built. Build it with: {DOCKER_BUILD_HINT}"
     )

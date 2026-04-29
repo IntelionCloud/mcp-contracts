@@ -21,3 +21,6 @@ Thumbs.db
 .idea/
 *.swp
 *.swo
+
+# Local-only test documents (real contracts — not for the public repo)
+real-docs-to-test/

@@ -3,6 +3,9 @@ Contract structure model — parse MD into addressable clauses.
 Allows finding clauses by reference (e.g. "4.2") and extracting summaries.
 """
 import re
+from typing import Optional
+
+from core.i18n import Lang, detect_lang, labels_for, pattern_sets_for, patterns_for
 
 
 def _text_after_accept(text: str) -> str:
@@ -48,7 +51,13 @@ def parse_contract(md_text: str) -> list[Clause]:
     """Parse MD text into a flat list of Clause objects with correct refs.
 
     Returns a flat list where each clause has a ref like "1.", "1.1.", "1.1.1."
+
+    `convert_docx_to_md` emits `<br>` for soft line breaks (Shift+Enter
+    inside a Word paragraph). Real-world contracts often pack their entire
+    structure into a few paragraphs separated by `<br>`, so without this
+    normalization the parser sees almost no line boundaries.
     """
+    md_text = md_text.replace('<br>', '\n')
     lines = md_text.split('\n')
     clauses = []
 
@@ -163,9 +172,10 @@ def parse_contract(md_text: str) -> list[Clause]:
 def find_clause(clauses: list[Clause], query: str) -> list[Clause]:
     """Find clauses by ref prefix or keyword search.
 
-    Examples:
+    Examples (works for both Russian and English contracts):
         find_clause(clauses, "4.2")      → clause 4.2 and its sub-clauses
         find_clause(clauses, "оплата")   → clauses containing "оплата"
+        find_clause(clauses, "payment")  → clauses containing "payment"
         find_clause(clauses, "7")        → chapter 7 and all its clauses
     """
     results = []
@@ -189,12 +199,23 @@ def find_clause(clauses: list[Clause], query: str) -> list[Clause]:
     return results
 
 
-def contract_summary(clauses: list[Clause], md_text: str) -> str:
+def contract_summary(
+    clauses: list[Clause], md_text: str, language: Optional[Lang] = None
+) -> str:
     """Generate a compact structural summary of a contract.
 
     Extracts: parties, subject, price, deadlines, chapters outline.
+
+    Language selection:
+      * language=None (default) — auto-detect from md_text by char ratio.
+      * language="ru"|"en"      — explicit override; useful when content
+        mixes scripts or you want EN labels on a RU contract.
+
+    Patterns and output labels both come from `core.i18n`.
     """
     clean = _text_after_accept(md_text)
+    pattern_sets = pattern_sets_for(language, md_text)
+    L = labels_for(language, md_text)
     lines = []
 
     # Title
@@ -205,33 +226,54 @@ def contract_summary(clauses: list[Clause], md_text: str) -> str:
             break
     lines.append(f"**{first_line}**\n")
 
-    # Parties — look for "именуемое в дальнейшем"
-    for m in re.finditer(r'«([^»]+)»[^«]*именуем\w+ в дальнейшем\s*[«"]([^»"]+)[»"]', clean):
-        lines.append(f"- {m.group(2)}: {m.group(1)}")
+    # Parties — across all pattern sets, dedupe by (full_name, role).
+    seen_parties = set()
+    for ps in pattern_sets:
+        for m in re.finditer(ps["parties"], clean):
+            key = (m.group(1), m.group(2))
+            if key in seen_parties:
+                continue
+            seen_parties.add(key)
+            lines.append(f"- {m.group(2)}: {m.group(1)}")
 
-    # Price — look for "Цена Договора" or stoimost
-    price_match = re.search(
-        r'в размере\s+([\d\s]+)\s*\(([^)]+)\)\s*рублей', clean
-    )
-    if price_match:
-        lines.append(f"- Цена: {price_match.group(1).strip()} ({price_match.group(2)}) руб.")
+    # Price — first match wins per pattern set (bilingual contracts repeat
+    # the same price on each side; we'd otherwise list it twice).
+    seen_prices = set()
+    for ps in pattern_sets:
+        m = re.search(ps["price"], clean)
+        if not m:
+            continue
+        groups = m.groups()
+        amount = groups[0].strip()
+        words = groups[1] if len(groups) >= 2 else ""
+        currency = groups[2] if len(groups) >= 3 else L["currency"]
+        key = (amount, words)
+        if key in seen_prices:
+            continue
+        seen_prices.add(key)
+        suffix = f" {currency}" if currency else ""
+        lines.append(f"- {L['price']}: {amount} ({words}){suffix}")
 
-    # Deadline — look for calendar/working days
-    deadline_match = re.search(
-        r'Срок выполнения работ?:\s*(\d+\s*(?:календарных|рабочих)\s*дней[^.]*)', clean
-    )
-    if deadline_match:
-        lines.append(f"- Срок: {deadline_match.group(1)}")
+    # Deadline — same dedupe strategy.
+    seen_deadlines = set()
+    for ps in pattern_sets:
+        m = re.search(ps["deadline"], clean)
+        if not m:
+            continue
+        text = m.group(1).strip()
+        if text in seen_deadlines:
+            continue
+        seen_deadlines.add(text)
+        lines.append(f"- {L['deadline']}: {text}")
 
     # Chapters outline
-    lines.append("\n**Структура:**")
+    lines.append(f"\n**{L['structure']}:**")
     for c in clauses:
         if c.level == 0:
             lines.append(f"  {c.ref}. {c.clean_text()}")
         elif c.level == 1:
-            # Count sub-clauses
             subs = [x for x in clauses if x.ref.startswith(c.ref + '.')]
-            sub_info = f" ({len(subs)} подп.)" if subs else ""
+            sub_info = f" ({len(subs)} {L['sub_clauses']})" if subs else ""
             preview = c.clean_text()[:60]
             lines.append(f"    {c.ref}. {preview}...{sub_info}" if len(c.clean_text()) > 60
                          else f"    {c.ref}. {preview}{sub_info}")
@@ -239,29 +281,36 @@ def contract_summary(clauses: list[Clause], md_text: str) -> str:
     return '\n'.join(lines)
 
 
-def validate_references(clauses: list[Clause], md_text: str) -> list[dict]:
-    """Check internal references (п. X.Y) for correctness.
+def validate_references(
+    clauses: list[Clause], md_text: str, language: Optional[Lang] = None
+) -> list[dict]:
+    """Check internal cross-references for correctness.
 
-    Returns list of {ref, line, context, issue}.
+    Returns list of {ref, line, context, issue}. The reference pattern and
+    the "Clause X.Y" wording in messages come from `core.i18n` for the
+    detected (or explicit) language.
     """
     clean = _text_after_accept(md_text)
+    pattern_sets = pattern_sets_for(language, md_text)
+    L = labels_for(language, md_text)
     valid_refs = {c.ref for c in clauses}
-    # Also add with trailing dot
-    valid_refs_dot = {r + '.' for r in valid_refs}
 
     issues = []
-    # Find all "п. X.Y." references
-    for m in re.finditer(r'п\.\s*([\d]+\.[\d]+\.?)', clean):
-        ref = m.group(1).rstrip('.')
-        if ref not in valid_refs:
-            # Get context
-            start = max(0, m.start() - 30)
-            end = min(len(clean), m.end() + 30)
-            context = clean[start:end].replace('\n', ' ')
-            issues.append({
-                'ref': f'п. {ref}',
-                'context': f'...{context}...',
-                'issue': f'Reference п. {ref} not found in contract structure',
-            })
+    seen_positions = set()  # avoid duplicate flags from overlapping bilingual patterns
+    for ps in pattern_sets:
+        for m in re.finditer(ps["ref_link"], clean):
+            if m.start() in seen_positions:
+                continue
+            seen_positions.add(m.start())
+            ref = m.group(1).rstrip('.')
+            if ref not in valid_refs:
+                start = max(0, m.start() - 30)
+                end = min(len(clean), m.end() + 30)
+                context = clean[start:end].replace('\n', ' ')
+                issues.append({
+                    'ref': f"{L['ref_marker']} {ref}",
+                    'context': f'...{context}...',
+                    'issue': f"Reference {L['ref_marker']} {ref} not found in contract structure",
+                })
 
     return issues
