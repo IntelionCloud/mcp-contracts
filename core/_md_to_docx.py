@@ -575,6 +575,9 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
     #     table row (the table parser will render it) or an explicit
     #     markdown heading (handled in the main loop below as a real
     #     heading instead of being doubled-up here). ---
+    body_has_content = False  # used to suppress page_break_before on the
+                              # very first h1 of the document (otherwise
+                              # Word would open with a blank first page)
     first_line_idx = 0
     while first_line_idx < len(lines) and not lines[first_line_idx].strip():
         first_line_idx += 1
@@ -587,6 +590,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
                           font_size=FONT_SIZE_HEADING, color=COLOR_HEADING,
                           alignment=WD_ALIGN_PARAGRAPH.CENTER)
             first_line_idx += 1
+            body_has_content = True
     else:
         first_line_idx = 0
 
@@ -645,6 +649,12 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
             )
             para.paragraph_format.space_before = Pt(before_pt)
             para.paragraph_format.space_after = Pt(after_pt)
+            # h1 introduces a new top-level section — start it on a new
+            # page (skip for the very first h1, which would otherwise
+            # produce a blank cover page).
+            if level == 1 and body_has_content:
+                para.paragraph_format.page_break_before = True
+            body_has_content = True
             i += 1
             continue
 
@@ -654,6 +664,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
                 fn_text = line.strip()
                 add_paragraph(doc, fn_text, accept, font_size=FONT_SIZE_SMALL,
                               indent_cm=1.0)
+                body_has_content = True
             i += 1
             continue
 
@@ -665,6 +676,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
                 i += 1
             rows_data = parse_table_rows(table_lines)
             add_table(doc, rows_data, accept)
+            body_has_content = True
             continue
 
         # Classify the line
@@ -687,6 +699,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
             set_paragraph_numbering(para, num_id, 0)
             # Add some spacing before chapter
             para.paragraph_format.space_before = Pt(12)
+            body_has_content = True
             i += 1
             continue
 
@@ -694,6 +707,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
             # Clause — ilvl=1, normal text
             para = add_paragraph(doc, clean_text, accept)
             set_paragraph_numbering(para, num_id, 1)
+            body_has_content = True
             i += 1
             continue
 
@@ -701,6 +715,7 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
             # Sub-clause — ilvl=2
             para = add_paragraph(doc, clean_text, accept)
             set_paragraph_numbering(para, num_id, 2)
+            body_has_content = True
             i += 1
             continue
 
@@ -710,11 +725,13 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
             first_run = para.runs[0] if para.runs else None
             if first_run:
                 first_run.text = '– ' + first_run.text
+            body_has_content = True
             i += 1
             continue
 
         # Plain text paragraph
         para = add_paragraph(doc, clean_text, accept)
+        body_has_content = True
         i += 1
 
     # --- Save ---

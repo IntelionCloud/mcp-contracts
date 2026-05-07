@@ -181,6 +181,68 @@ def test_explicit_h1_first_line_does_not_double_render(tmp_path: Path):
     assert xml.count("Top Title") == 1, "title text should appear exactly once"
 
 
+def _h1_paragraphs_with_page_break_flag(xml: str):
+    """Return list of bool flags — True if the paragraph carrying the given
+    h1 text has <w:pageBreakBefore/> in its <w:pPr>.
+
+    h1 paragraphs in our converter are produced with bold + 13pt font, so
+    we look for paragraphs containing that combination plus the heading
+    text.
+    """
+    import re as _re
+    flags = []
+    for p_match in _re.finditer(r"<w:p\b[^>]*>(.*?)</w:p>", xml, _re.DOTALL):
+        body = p_match.group(1)
+        if "Top Title" in body or "Annex" in body:
+            flags.append("<w:pageBreakBefore/>" in body)
+    return flags
+
+
+def test_h1_after_other_content_gets_page_break(tmp_path: Path):
+    md = tmp_path / "pb.md"
+    md.write_text(
+        "# Top Title\n\n"
+        "Body of the first section.\n\n"
+        "# Annex\n\n"
+        "Body of the annex.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "pb.docx"
+    build_docx(str(md), str(out), accept=False)
+    xml = _document_xml(out)
+
+    flags = _h1_paragraphs_with_page_break_flag(xml)
+    assert len(flags) == 2, f"expected 2 h1 paragraphs, got {len(flags)}: {flags}"
+    # First h1 must NOT have pageBreakBefore (would force a blank cover page).
+    assert flags[0] is False, "first h1 should not carry pageBreakBefore"
+    # Second h1 must have pageBreakBefore — it starts a new top-level section.
+    assert flags[1] is True, "second h1 should carry pageBreakBefore"
+
+
+def test_h1_only_no_page_break(tmp_path: Path):
+    md = tmp_path / "pb1.md"
+    md.write_text("# Top Title\n\nOnly body.\n", encoding="utf-8")
+    out = tmp_path / "pb1.docx"
+    build_docx(str(md), str(out), accept=False)
+    xml = _document_xml(out)
+    assert "<w:pageBreakBefore/>" not in xml, \
+        "single h1 must not carry pageBreakBefore"
+
+
+def test_h2_does_not_get_page_break(tmp_path: Path):
+    md = tmp_path / "pb2.md"
+    md.write_text(
+        "# Top Title\n\nBody.\n\n## Section\n\nMore.\n",
+        encoding="utf-8",
+    )
+    out = tmp_path / "pb2.docx"
+    build_docx(str(md), str(out), accept=False)
+    xml = _document_xml(out)
+    # No h1 after content here, so no pageBreakBefore should appear.
+    assert "<w:pageBreakBefore/>" not in xml, \
+        "h2 must not trigger pageBreakBefore"
+
+
 def test_table_first_line_is_not_consumed_as_title(tmp_path: Path):
     """When the document begins with a table, the first row must be
     rendered inside the table — not as a centered bold paragraph with
