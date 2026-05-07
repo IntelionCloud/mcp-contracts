@@ -58,13 +58,24 @@ MARGIN_BOTTOM = Cm(2)
 def parse_segments(text: str, accept: bool):
     """
     Parse text into segments: [(text, style), ...]
-    style: 'normal', 'insert', 'delete', 'footnote'
+    style: 'normal', 'insert', 'delete', 'footnote', 'bold', 'italic'
+
+    Recognised inline markers:
+      {++…++}                   tracked-change insertion
+      {--…--}                   tracked-change deletion
+      [^N]                      footnote reference
+      <strong>…</strong>, <b>…</b>      HTML bold
+      <em>…</em>, <i>…</i>              HTML italic
+      **…**                     Markdown bold
     """
     segments = []
     combined = re.compile(
-        r'(\{\+\+.*?\+\+\})'
-        r'|(\{--.*?--\})'
-        r'|(\[\^\d+\])',
+        r'(\{\+\+.*?\+\+\})'                                # 1: insertion
+        r'|(\{--.*?--\})'                                   # 2: deletion
+        r'|(\[\^\d+\])'                                     # 3: footnote ref
+        r'|(<(?:strong|b)>.*?</(?:strong|b)>)'              # 4: html bold
+        r'|(<(?:em|i)>.*?</(?:em|i)>)'                      # 5: html italic
+        r'|(\*\*[^*\n]+?\*\*)',                             # 6: md bold
         re.DOTALL
     )
 
@@ -87,6 +98,15 @@ def parse_segments(text: str, accept: bool):
             if not accept:
                 segments.append((m.group(3), 'footnote'))
             # in accept mode, footnote refs are omitted
+        elif m.group(4):  # html bold
+            inner = re.sub(r'</?(?:strong|b)>', '', m.group(4))
+            segments.append((inner, 'bold'))
+        elif m.group(5):  # html italic
+            inner = re.sub(r'</?(?:em|i)>', '', m.group(5))
+            segments.append((inner, 'italic'))
+        elif m.group(6):  # md bold
+            inner = m.group(6)[2:-2]
+            segments.append((inner, 'bold'))
 
         last = m.end()
 
@@ -392,6 +412,12 @@ def add_run_with_style(para, text: str, style: str, font_name: str,
         run.font.color.rgb = COLOR_COMMENT
         run.font.size = FONT_SIZE_SMALL
         run.font.superscript = True
+    elif style == 'bold':
+        run.font.color.rgb = COLOR_BODY
+        run.font.bold = True
+    elif style == 'italic':
+        run.font.color.rgb = COLOR_BODY
+        run.font.italic = True
 
 
 def add_paragraph(doc, text: str, accept: bool, bold: bool = False,
@@ -420,6 +446,10 @@ def add_paragraph(doc, text: str, accept: bool, bold: bool = False,
             run.font.color.rgb = color or COLOR_HEADING
         else:
             add_run_with_style(para, seg_text, seg_style, FONT_NAME, fs, accept)
+            # Inline-styled run inside a bold parent paragraph (e.g. italic
+            # inside a bold heading) — inherit parent's bold.
+            if bold and para.runs:
+                para.runs[-1].font.bold = True
 
     return para
 
@@ -540,16 +570,23 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
     num_id = create_multilevel_numbering(doc)
     detector = NumberingDetector()
 
-    # --- First non-empty line = document title (bold, centered) ---
+    # --- First non-empty line = implicit document title (bold, centered).
+    #     Skip the implicit-title pass when the first content line is a
+    #     table row (the table parser will render it) or an explicit
+    #     markdown heading (handled in the main loop below as a real
+    #     heading instead of being doubled-up here). ---
     first_line_idx = 0
     while first_line_idx < len(lines) and not lines[first_line_idx].strip():
         first_line_idx += 1
     if first_line_idx < len(lines):
-        from docx.enum.text import WD_ALIGN_PARAGRAPH
-        add_paragraph(doc, lines[first_line_idx].strip(), accept, bold=True,
-                      font_size=FONT_SIZE_HEADING, color=COLOR_HEADING,
-                      alignment=WD_ALIGN_PARAGRAPH.CENTER)
-        first_line_idx += 1
+        first_line = lines[first_line_idx].strip()
+        is_explicit_heading = bool(re.match(r'^#{1,6}\s+', first_line))
+        if not is_table_row(first_line) and not is_explicit_heading:
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            add_paragraph(doc, first_line, accept, bold=True,
+                          font_size=FONT_SIZE_HEADING, color=COLOR_HEADING,
+                          alignment=WD_ALIGN_PARAGRAPH.CENTER)
+            first_line_idx += 1
     else:
         first_line_idx = 0
 
@@ -575,6 +612,39 @@ def build_docx(md_path: str, docx_path: str, accept: bool = False):
 
         # Horizontal rule
         if line.strip() == '---':
+            i += 1
+            continue
+
+        # Markdown ATX heading: # … through ###### …
+        # Level mapping: 1 = title size + centered; 2-3 = section size;
+        # 4-6 = body size, all bold.
+        md_heading = re.match(r'^(#{1,6})\s+(.+?)\s*#*$', line.strip())
+        if md_heading:
+            level = len(md_heading.group(1))
+            heading_text = md_heading.group(2)
+            from docx.enum.text import WD_ALIGN_PARAGRAPH
+            if level == 1:
+                hsize, halign, before_pt, after_pt = (
+                    FONT_SIZE_HEADING, WD_ALIGN_PARAGRAPH.CENTER, 12, 6
+                )
+            elif level == 2:
+                hsize, halign, before_pt, after_pt = (
+                    FONT_SIZE_SECTION, None, 10, 4
+                )
+            elif level == 3:
+                hsize, halign, before_pt, after_pt = (
+                    FONT_SIZE_SECTION, None, 8, 4
+                )
+            else:  # 4, 5, 6
+                hsize, halign, before_pt, after_pt = (
+                    FONT_SIZE, None, 6, 2
+                )
+            para = add_paragraph(
+                doc, heading_text, accept, bold=True,
+                font_size=hsize, color=COLOR_HEADING, alignment=halign,
+            )
+            para.paragraph_format.space_before = Pt(before_pt)
+            para.paragraph_format.space_after = Pt(after_pt)
             i += 1
             continue
 
