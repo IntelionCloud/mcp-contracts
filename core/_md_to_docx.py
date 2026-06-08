@@ -55,6 +55,11 @@ MARGIN_BOTTOM = Cm(2)
 # Tracked changes parsing
 # ---------------------------------------------------------------------------
 
+def _unescape_md(text: str) -> str:
+    r"""Unescape markdown backslash-escaped characters: \* -> *, \_ -> _, etc."""
+    return re.sub(r'\\([\\`*_{}\[\]()#+\-.!|])', r'\1', text)
+
+
 def parse_segments(text: str, accept: bool):
     """
     Parse text into segments: [(text, style), ...]
@@ -66,7 +71,7 @@ def parse_segments(text: str, accept: bool):
       [^N]                      footnote reference
       <strong>…</strong>, <b>…</b>      HTML bold
       <em>…</em>, <i>…</i>              HTML italic
-      **…**                     Markdown bold
+      **…**                     Markdown bold (escaped chars like \\* allowed inside)
     """
     segments = []
     combined = re.compile(
@@ -75,43 +80,43 @@ def parse_segments(text: str, accept: bool):
         r'|(\[\^\d+\])'                                     # 3: footnote ref
         r'|(<(?:strong|b)>.*?</(?:strong|b)>)'              # 4: html bold
         r'|(<(?:em|i)>.*?</(?:em|i)>)'                      # 5: html italic
-        r'|(\*\*[^*\n]+?\*\*)',                             # 6: md bold
+        r'|(\*\*(?:[^*\\\n]|\\.)+?\*\*)',                   # 6: md bold (allows \* inside)
         re.DOTALL
     )
 
     last = 0
     for m in combined.finditer(text):
         if m.start() > last:
-            segments.append((text[last:m.start()], 'normal'))
+            segments.append((_unescape_md(text[last:m.start()]), 'normal'))
 
         if m.group(1):  # insertion
             inner = m.group(1)[3:-3]
             if accept:
-                segments.append((inner, 'normal'))
+                segments.append((_unescape_md(inner), 'normal'))
             else:
-                segments.append((inner, 'insert'))
+                segments.append((_unescape_md(inner), 'insert'))
         elif m.group(2):  # deletion
             inner = m.group(2)[3:-3]
             if not accept:
-                segments.append((inner, 'delete'))
+                segments.append((_unescape_md(inner), 'delete'))
         elif m.group(3):  # footnote ref
             if not accept:
                 segments.append((m.group(3), 'footnote'))
             # in accept mode, footnote refs are omitted
         elif m.group(4):  # html bold
             inner = re.sub(r'</?(?:strong|b)>', '', m.group(4))
-            segments.append((inner, 'bold'))
+            segments.append((_unescape_md(inner), 'bold'))
         elif m.group(5):  # html italic
             inner = re.sub(r'</?(?:em|i)>', '', m.group(5))
-            segments.append((inner, 'italic'))
+            segments.append((_unescape_md(inner), 'italic'))
         elif m.group(6):  # md bold
             inner = m.group(6)[2:-2]
-            segments.append((inner, 'bold'))
+            segments.append((_unescape_md(inner), 'bold'))
 
         last = m.end()
 
     if last < len(text):
-        segments.append((text[last:], 'normal'))
+        segments.append((_unescape_md(text[last:]), 'normal'))
 
     return segments
 

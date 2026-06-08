@@ -54,6 +54,17 @@ def test_md_bold_does_not_consume_single_asterisks():
     assert parse_segments("5 * 3 = 15", accept=True) == [("5 * 3 = 15", "normal")]
 
 
+def test_md_bold_with_escaped_asterisks():
+    # Bold span containing \* (escaped asterisk) — the real bug case:
+    # "+7(913)\*\*\*-\*\*-16" inside bold markers must render as bold text
+    # with literal asterisks, not be rejected/split by the bold regex.
+    out = parse_segments(r"**+7(913)\*\*\*-\*\*-16** (СБП)", accept=True)
+    assert out == [
+        ("+7(913)***-**-16", "bold"),
+        (" (СБП)", "normal"),
+    ]
+
+
 def test_md_bold_combined_with_tracked_insertion():
     # Order is preserved; both markers are detected independently.
     out = parse_segments("see **note**, also {++added++} fact", accept=False)

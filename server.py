@@ -14,6 +14,8 @@ Tools:
   - list_comments: Extract reviewer comments from DOCX
   - list_tracked_changes: Extract tracked changes (insertions/deletions)
 """
+__version__ = "1.0.1"
+
 import json
 import logging
 import os
